@@ -1,56 +1,130 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3Api::class)
+
 package com.dmiche.startyandexnav
 
-import android.app.ActivityManager
 import android.app.ActivityOptions
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
+import android.content.pm.LauncherActivityInfo
+import android.content.pm.LauncherApps
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
-import android.util.Log
+import android.os.UserManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
 import com.dmiche.startyandexnav.ui.theme.StartYandexNavTheme
 
 
 class MainActivity : ComponentActivity() {
+    private var selectedApplication: String? = null
+    private var selectedDisplay: Int = 0
+
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val displays = (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
+        val installedApps = getInstalledApps(this@MainActivity)
+
         setContent {
+            val listState = rememberLazyListState()
+            var selectedIndex by remember { mutableIntStateOf(displays.size - 1) }
+            selectedDisplay = selectedIndex
             StartYandexNavTheme {
-                Column(
-                    Modifier.fillMaxWidth()
-                ) {
-                    for (i in 0..displays.size - 1) {
-                        Row(
-                            Modifier.fillMaxWidth()
-                        ) {
-                            Button(onClick = {
-                                startYandex(i)
-                            }, Modifier.fillMaxWidth()) {
-                                Text("Display ${i + 1}")
+                Column {
+                    LazyRow(state = listState) {
+                        for (i in displays.indices) {
+                            item {
+                                TextButton({ }) {
+                                    Text(
+                                        if (i == selectedIndex) "Display $i ✓" else "Display $i",
+                                        style = TextStyle(fontWeight = FontWeight.Bold),
+                                        fontSize = 14.sp,
+                                        modifier = Modifier
+                                            .selectable(selected = i == selectedIndex, onClick = {
+                                                selectedIndex = i
+                                                selectedDisplay = selectedIndex
+                                            })
+                                    )
+                                }
                             }
                         }
                     }
-                    for (i in 0..3) {
-                        Row(
-                            Modifier.fillMaxWidth()
-                        ) {
-                            Button(onClick = {
-                                killService(i)
-                            }, Modifier.fillMaxWidth()) {
-                                Text("Kill Service ${i + 1}")
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 128.dp)
+                    ) {
+                        items(installedApps) { app ->
+                            val title = app.label.toString()
+                            Card(
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .height(96.dp)
+                                    .width(96.dp),
+                                onClick = {
+                                    startApplication(
+                                        selectedIndex, app.applicationInfo.packageName
+                                    )
+                                }
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(2.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Image(
+                                            bitmap = app.getIcon(resources.configuration.densityDpi)
+                                                .toBitmap().asImageBitmap(),
+                                            contentDescription = title,
+                                            modifier = Modifier
+                                                .height(32.dp)
+                                                .width(32.dp)
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            title,
+                                            style = TextStyle(fontWeight = FontWeight.Bold),
+                                            textAlign = TextAlign.Center,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -59,90 +133,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun getAppUid(packageName: String): Int {
-        val pidsTask = (getSystemService(ACTIVITY_SERVICE) as ActivityManager).runningAppProcesses
-        for (i in pidsTask.indices) {
-            if (pidsTask[i].processName == packageName) {
-                return pidsTask[i].uid
-            }
-        }
-        return -1
-    }
-
-    override fun onStart() {
-        super.onStart()
-// TODO: uncomment next line for autostart
-//        startYandex(1)
-    }
-
-    private fun killService(type: Int) {
-        when (type) {
-            0 -> killApp("com.astrob.turbodog.NaviAIDLService")
-            1 -> killApp("com.astrob.turbodog")
-            2 -> killService2()
-            3 -> killService3()
-        }
-    }
-
-    private fun killService2() {
-        try {
-                val intent = Intent("com.astrob.turbodog.NAVI_AIDL_SERVICE")
-                intent.setComponent(
-                    ComponentName(
-                        "com.astrob.turbodog",
-                        "com.astrob.turbodog.NaviAIDLService"
-                    )
-                )
-                stopService(intent);
-        } catch (ex: Exception) {
-            Toast.makeText(this, ex.toString(), Toast.LENGTH_SHORT).show()
-            ex.printStackTrace()
-        }
-    }
-
-    private fun killService3() {
-        try {
-            val intent = Intent()
-            intent.setComponent(
-                ComponentName(
-                    "com.astrob.turbodog",
-                    "com.astrob.turbodog.NaviAIDLService"
-                )
-            )
-            stopService(intent);
-        } catch (ex: Exception) {
-            Toast.makeText(this, ex.toString(), Toast.LENGTH_SHORT).show()
-            ex.printStackTrace()
-        }
-    }
-
-    private fun killApp(packageName: String) {
-        try {
-//            Runtime.getRuntime().exec("am force-stop $packageName")
-            val pUID = getAppUid(packageName)
-            val activityManager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
-            activityManager.killBackgroundProcesses(packageName)
-
-            Toast.makeText(this, "pUID: $pUID", Toast.LENGTH_SHORT).show()
-            if (pUID >= 0)
-                android.os.Process.killProcess(pUID);
-        } catch (ex: Exception) {
-            Toast.makeText(this, ex.toString(), Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun startYandex(index: Int) {
+    private fun startApplication(index: Int, packageName: String = "ru.yandex.yandexnavi") {
+        selectedApplication = packageName
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val intent =
-                    packageManager.getLaunchIntentForPackage("ru.yandex.yandexnavi") ?: return
+                val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return
                 val displays =
                     (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
                 val options = ActivityOptions.makeBasic()
                 val text = displays.map { "${it.displayId}, ${it.name}" }
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-                options.launchDisplayId =
-                    displays.getOrNull(index)?.displayId ?: return
+                options.launchDisplayId = displays.getOrNull(index)?.displayId ?: return
                 startActivity(intent, options.toBundle())
                 Toast.makeText(this, text.getOrNull(index) ?: "", Toast.LENGTH_SHORT).show()
                 finish()
@@ -150,5 +151,19 @@ class MainActivity : ComponentActivity() {
         } catch (ex: Exception) {
             Toast.makeText(this, ex.toString(), Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun getInstalledApps(context: Context): List<LauncherActivityInfo> {
+        val result: ArrayList<LauncherActivityInfo> = arrayListOf()
+        val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+        val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+
+        for (profile in userManager.userProfiles) {
+            for (app in launcherApps.getActivityList(null, profile)) {
+                result.add(app)
+            }
+        }
+
+        return result
     }
 }
