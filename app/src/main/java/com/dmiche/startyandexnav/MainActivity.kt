@@ -48,11 +48,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.dmiche.startyandexnav.ui.theme.StartYandexNavTheme
 
+data class AppDisplayQueue(val packageName: String, val display: Int)
 
 class MainActivity : ComponentActivity() {
-    private var selectedApplication: String? = null
-    private var selectedDisplay: Int = 0
-
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +60,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val listState = rememberLazyListState()
             var selectedIndex by remember { mutableIntStateOf(displays.size - 1) }
-            selectedDisplay = selectedIndex
+
+            getFromSP(KEY_SCREEN, -1).takeIf { it >= 0 }?.let { value ->
+                selectedIndex = value
+            } ?: saveToSP(KEY_SCREEN, selectedIndex)
             StartYandexNavTheme {
                 Column {
                     LazyRow(state = listState) {
@@ -76,7 +77,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier
                                             .selectable(selected = i == selectedIndex, onClick = {
                                                 selectedIndex = i
-                                                selectedDisplay = selectedIndex
+                                                saveToSP(KEY_SCREEN, selectedIndex)
                                             })
                                     )
                                 }
@@ -94,8 +95,15 @@ class MainActivity : ComponentActivity() {
                                     .height(96.dp)
                                     .width(96.dp),
                                 onClick = {
-                                    startApplication(
-                                        selectedIndex, app.applicationInfo.packageName
+                                    saveToSP(KEY_APP, app.applicationInfo.packageName)
+                                    startAppsChain(
+                                        listOf(
+                                            AppDisplayQueue(
+                                                app.applicationInfo.packageName,
+                                                selectedIndex
+                                            ),
+                                            CAR_LAUNCHER
+                                        )
                                     )
                                 }
                             ) {
@@ -133,20 +141,62 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        getFromSP(KEY_SCREEN, -1).takeIf { it >= 0 }?.let { screen ->
+            getFromSP(KEY_APP, null)?.let { app ->
+                startAppsChain(
+                    listOf(
+                        AppDisplayQueue(
+                            app, screen
+                        ),
+                        CAR_LAUNCHER
+                    )
+                )
+            }
+        }
+    }
+
+    private fun saveToSP(key: String, value: String) {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return
+        with(sharedPref.edit()) {
+            putString(key, value)
+            apply()
+        }
+    }
+
+    private fun saveToSP(key: String, value: Int) {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return
+        with(sharedPref.edit()) {
+            putInt(key, value)
+            apply()
+        }
+    }
+
+    private fun getFromSP(key: String, default_value: Int = -1): Int {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return default_value
+        with(sharedPref) {
+            return getInt(key, default_value)
+        }
+    }
+
+    private fun getFromSP(key: String, default_value: String? = null): String? {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return default_value
+        with(sharedPref) {
+            return getString(key, default_value)
+        }
+    }
+
     private fun startApplication(index: Int, packageName: String = "ru.yandex.yandexnavi") {
-        selectedApplication = packageName
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return
                 val displays =
                     (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
                 val options = ActivityOptions.makeBasic()
-                val text = displays.map { "${it.displayId}, ${it.name}" }
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
                 options.launchDisplayId = displays.getOrNull(index)?.displayId ?: return
                 startActivity(intent, options.toBundle())
-                Toast.makeText(this, text.getOrNull(index) ?: "", Toast.LENGTH_SHORT).show()
-                finish()
             }
         } catch (ex: Exception) {
             Toast.makeText(this, ex.toString(), Toast.LENGTH_SHORT).show()
@@ -165,5 +215,19 @@ class MainActivity : ComponentActivity() {
         }
 
         return result
+    }
+
+    private fun startAppsChain(list: List<AppDisplayQueue>, finishOnEnd: Boolean = true) {
+        list.forEach { (packageName, screen) ->
+            startApplication(screen, packageName)
+        }
+
+        if (finishOnEnd) finish()
+    }
+
+    companion object {
+        private const val KEY_SCREEN = "KEY_SCREEN"
+        private const val KEY_APP = "KEY_APP"
+        private val CAR_LAUNCHER = AppDisplayQueue("com.desaysv.launcher", 0)
     }
 }
